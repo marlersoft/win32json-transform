@@ -13,6 +13,10 @@ import json
 import collections
 from typing import List, Set, Dict, Optional
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+from apiref import ApiRef
+
 def getApiRefTopLevelType(type_obj):
     parents = type_obj["Parents"]
     if parents:
@@ -26,23 +30,6 @@ class DefaultDict(dict):
         self[key] = self.factory(key)
         return self[key]
 
-class ApiRef:
-    def __init__(self, api: str, name: str):
-        self.api = api
-        self.name = name
-        self.combined = format("{}:{}".format(api, name))
-    def __eq__(self, other):
-        return self.combined.__eq__(other.combined)
-    def __ge__(self, other):
-        return self.combined.__ge__(other.combined)
-    def __lt__(self, other):
-        return self.combined.__lt__(other.combined)
-    def __hash__(self):
-        return self.combined.__hash__()
-    def __str__(self):
-        return self.combined
-    def __repr__(self):
-        return self.combined
 class ApiTypeNameToApiRefMap:
     def __init__(self):
         self.top_level: Dict[str,Set[ApiRef]] = {}
@@ -72,8 +59,7 @@ def main():
     win32json_branch = "10.0.19041.202-preview"
     win32json_sha = "7164f4ce9fe17b7c5da3473eed26886753ce1173"
 
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    win32json = os.path.join(script_dir, "win32json")
+    win32json = os.path.join(SCRIPT_DIR, "win32json")
     if not os.path.exists(win32json):
         print("Error: missing '{}'".format(win32json))
         print("Clone it with:")
@@ -181,7 +167,7 @@ def main():
 
     out_direct_deps_filename = "out-direct-deps.txt"
     print("generating {}...".format(out_direct_deps_filename))
-    with open(os.path.join(script_dir, out_direct_deps_filename), "w") as file:
+    with open(os.path.join(SCRIPT_DIR, out_direct_deps_filename), "w") as file:
         for api in apis:
             table = api_direct_type_refs_table[api]
             for type_name,refs in table.top_level.items():
@@ -193,7 +179,7 @@ def main():
     out_recursive_deps_filename = "out-recursive-deps.txt"
     print("calculating recursive type references (will store in {})...".format(out_recursive_deps_filename))
     api_recursive_type_refs_table: Dict[str,dict[str,Set[ApiRef]]] = {}
-    with open(os.path.join(script_dir, out_recursive_deps_filename), "w") as file:
+    with open(os.path.join(SCRIPT_DIR, out_recursive_deps_filename), "w") as file:
         for api in apis:
             #print("calculating recursive deps on {}...".format(api))
             direct_type_refs_table = api_direct_type_refs_table[api]
@@ -221,7 +207,7 @@ def main():
         else:
             type_set[t] = cycle
 
-    with open(os.path.join(script_dir, "out-cycles.txt"), "w") as file:
+    with open(os.path.join(SCRIPT_DIR, "out-cycles.txt"), "w") as file:
         for api in apis:
             #print("API: {}".format(api))
             table = api_recursive_type_refs_table[api]
@@ -261,14 +247,20 @@ def main():
 
     api_types_list = list(api_cycle_type_set)
     api_types_list.sort()
-    with open(os.path.join(script_dir, "out-cycle-types.txt"), "w") as file:
+    with open(os.path.join(SCRIPT_DIR, "out-cycle-types.txt"), "w") as file:
         for cycle_type in api_types_list:
             file.write("{}\n".format(cycle_type))
             for t in api_cycle_type_set[cycle_type]:
                 file.write("    {}\n".format(t))
+    with open(os.path.join(SCRIPT_DIR, "out-cycle-types.py"), "w") as file:
+        file.write("from apiref import ApiRef\n")
+        file.write("CYCLE_TYPES = {\n")
+        for cycle_type in api_types_list:
+            file.write("    ApiRef(\"{}\", \"{}\"),\n".format(cycle_type.api, cycle_type.name))
+        file.write("}\n")
 
     # NOTE: this is not all the cycles, just some of the for now
-    with open(os.path.join(script_dir, "out-cycle-types.dot"), "w") as file:
+    with open(os.path.join(SCRIPT_DIR, "out-cycle-types.dot"), "w") as file:
         file.write("digraph type_cycles {\n")
         links = collections.defaultdict(set)
         def addLink(links, a, b):
@@ -282,7 +274,7 @@ def main():
             for i in range(1, len(cycle)):
                 addLink(links, cycle[i-1], cycle[i])
         file.write("}\n")
-    #with open(os.path.join(script_dir, "out-self-cycle-types.txt"), "w") as file:
+    #with open(os.path.join(SCRIPT_DIR, "out-self-cycle-types.txt"), "w") as file:
     #    types_list = list(self_cycle_type_set)
     #    types_list.sort()
     #    for cycle_type in types_list:
