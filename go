@@ -12,8 +12,14 @@ import sys
 import json
 from typing import List, Set, Dict
 
-def apiRefTypeName(type_obj):
-    return ".".join(type_obj["Parents"] + [type_obj["Name"]])
+#def apiRefTypeName(type_obj):
+#    return ".".join(type_obj["Parents"] + [type_obj["Name"]])
+
+def getApiRefTopLevelType(type_obj):
+    parents = type_obj["Parents"]
+    if parents:
+        return parents[0]
+    return type_obj["Name"]
 
 #def apiRefName(type_obj):
 #    return type_obj["Api"] + ":" + apiRefTypeName(type_obj)
@@ -25,30 +31,6 @@ class DefaultDict(dict):
         self[key] = self.factory(key)
         return self[key]
 
-
-#class TypeRef:
-#    def __init__(self, referenced_by, type_reference):
-#        self.referenced_by = referenced_by
-#        self.type_reference = type_reference
-class TypeRefSet:
-    def __init__(self, name: str):
-        self.name = name
-        self.referenced_by: List[str] = []
-
-class ApiRefSet:
-    def __init__(self, name: str):
-        self.name = name
-        #self.refs: List[TypeRef] = []
-        self.refs = DefaultDict(TypeRefSet)
-
-class ApiObj:
-    def __init__(self, json_obj: dict):
-        self.json_obj = json_obj
-class ApiObjConstant(ApiObj):
-    def __init__(self, json_obj: dict):
-        super().__init__(json_obj)
-
-
 class ApiRef:
     def __init__(self, api: str, name: str):
         self.api = api
@@ -58,15 +40,16 @@ class ApiRef:
         return self.combined.__eq__(other.combined)
     def __hash__(self):
         return self.combined.__hash__()
-
-def makeApiSet(ignore) -> Set[str]:
-    return set()
+class ApiTypeNameToApiRefMap:
+    def __init__(self):
+        self.top_level: dict[str,Set[ApiRef]] = {}
+        self.nested: dict[str,Set[ApiRef]] = {}
 
 def getJsonApiRefs(api_refs: Set[ApiRef], json_obj):
     if isinstance(json_obj, dict):
         if "Kind" in json_obj:
             if json_obj["Kind"] == "ApiRef":
-                api_refs.add(ApiRef(json_obj["Api"], apiRefTypeName(json_obj)))
+                api_refs.add(ApiRef(json_obj["Api"], getApiRefTopLevelType(json_obj)))
                 return
         for name,val in json_obj.items():
             getJsonApiRefs(api_refs, val)
@@ -102,10 +85,7 @@ def main():
     apis = [getApiName(basename) for basename in os.listdir(api_dir)]
     apis.sort()
 
-    #api_deps = ApiDeps()
-    api_direct_deps = DefaultDict(makeApiSet)
-
-    api_direct_type_refs_table: dict[str,dict[str,Set[ApiRef]]] = {}
+    api_direct_type_refs_table: dict[str,ApiTypeNameToApiRefMap] = {}
     print("loading types...")
     for api_name in apis:
         #print(api_name)
@@ -117,7 +97,7 @@ def main():
         functions = api["Functions"]
         unicode_aliases = api["UnicodeAliases"]
 
-        api_ref_sets = DefaultDict(ApiRefSet)
+        #api_ref_sets = DefaultDict(ApiRefSet)
 
         #print("  {} Constants".format(len(constants)))
 
@@ -140,16 +120,16 @@ def main():
         #print("  {} Functions".format(len(functions)))
         #print("  {} UnicodeAliases".format(len(unicode_aliases)))
 
-        def addTypeRefs(type_refs_table: Dict[str,Set[ApiRef]], name_prefix: str, type_json: Dict):
+        def addTypeRefs(type_map: ApiTypeNameToApiRefMap, name_prefix: str, type_json: Dict):
             kind = type_json["Kind"]
             full_name = name_prefix + type_json["Name"]
             #if len(name_prefix) > 0:
             #    print("nested type '{}'".format(full_name))
             api_refs: Set[ApiRef] = set()
             if kind == "Struct" or kind == "Union":
-                getJsonApiRefs(api_refs, type_json)
+                getJsonApiRefs(api_refs, type_json["Fields"])
                 for nested_type_json in type_json["NestedTypes"]:
-                    addTypeRefs(type_refs_table, full_name + ".", nested_type_json)
+                    addTypeRefs(type_map, full_name + ".", nested_type_json)
             elif kind == "Enum" or kind == "ComClassID":
                 getJsonApiRefs(api_refs, type_json)
                 assert(len(api_refs) == 0)
@@ -159,52 +139,56 @@ def main():
                 sys.exit(kind)
 
             # this could happen because of the same types defined for multiple architectures
-            if full_name in type_refs_table:
+            table = type_map.top_level if (len(name_prefix) == 0) else type_map.nested
+            if full_name in table:
                 #raise ValueError("key '{}' already exists".format(full_name))
-                type_refs_table[full_name] = type_refs_table[full_name].union(api_refs)
+                table[full_name] = table[full_name].union(api_refs)
             else:
-                type_refs_table[full_name] = api_refs
+                table[full_name] = api_refs
 
 
-        type_refs_table: dict[str,Set[ApiRef]] = {}
+        type_map = ApiTypeNameToApiRefMap()
         for type_json in types:
-            addTypeRefs(type_refs_table, "", type_json)
-        api_direct_type_refs_table[api_name] = type_refs_table
+            addTypeRefs(type_map, "", type_json)
+        api_direct_type_refs_table[api_name] = type_map
 
-    print("types loaded")
+    print("types loaded, checking that type refs exist...")
     for api in apis:
         direct_type_refs_table = api_direct_type_refs_table[api]
-        print("api {}".format(api))
+        #print("api {}".format(api))
 
         i = 0
-        for type_name,refs in direct_type_refs_table.items():
+        for type_name,refs in direct_type_refs_table.top_level.items():
             i += 1
             if refs:
-                print("    {} refs from {}".format(len(refs), type_name))
+                #print("    {} refs from {}".format(len(refs), type_name))
                 for ref in refs:
                     #print("        {}".format(ref.combined))
                     # make sure the API is valid
                     table = api_direct_type_refs_table[ref.api]
                     # if not an anonymous type, make sure the type is valid
                     if not isAnonType(ref.name):
-                        if ref.name not in table:
-                            # check if it is a nested type here
-                            # TODO: I think I need to check every level of nesting
-                            print("api {} type_name{} ref.name {}".format(api, type_name, ref.name))
-                            type_names = type_name.split(".")
-                            ref_names = ref.name.split(".")
-                            i = 0
-                            while i < len(ref_names) and i < len(type_names):
-                                if ref_names[i] != type_names[-i-1]:
-                                    break
-                                i += 1
-
-                            nested_name = ".".join(type_names + ref_names[i:])
-                            if not nested_name in direct_type_refs_table:
+                        if ref.name not in table.top_level:
+                            nested_name = getNestedName(type_name, ref)
+                            if not nested_name in direct_type_refs_table.nested:
                                 sys.exit("!!!!!!!!!!! {} not in {} (and {} not in {})".format(ref.name, api, nested_name, api))
+                            # TODO: should we save this nested name? not sure that we need to
+
+
+    print("types verified")
 
 
 
+
+def getNestedName(type_name: str, ref: ApiRef) -> str:
+    type_names = type_name.split(".")
+    ref_names = ref.name.split(".")
+    i = 0
+    while i < len(ref_names) and i < len(type_names):
+        if ref_names[i] != type_names[-i-1]:
+            break
+        i += 1
+    return  ".".join(type_names + ref_names[i:])
 
 #    recursive_dep_table: dict[str,Set[str]] = {}
 #    for api in apis:
