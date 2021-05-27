@@ -78,7 +78,7 @@ def main():
 
     api_dir = os.path.join(win32json, "api")
 
-    def getApiName(basename):
+    def getApiName(basename: str) -> str:
         if not basename.endswith(".json"):
             sys.exit("found a non-json file '{}' in directory '{}'".format(basename, api_dir))
         return basename[:-5]
@@ -177,6 +177,23 @@ def main():
 
     print("types verified")
 
+    print("creating deps.dot...")
+    with open(os.path.join(script_dir, "deps.dot"), "w") as file:
+        file.write("digraph deps {\n")
+        for api in apis:
+            direct_type_refs_table = api_direct_type_refs_table[api]
+            for type_name,refs in direct_type_refs_table.top_level.items():
+                for ref in refs:
+                    table = api_direct_type_refs_table[ref.api]
+                    if not isAnonType(ref.name) and ref.name in table.top_level:
+                        file.write("\"{}\" -> \"{}\";\n".format(type_name, ref.name))
+        file.write("}\n")
+
+    print("done")
+    #for api in apis:
+    #for api in [apis[0]]:
+    #    print("calculating recursive deps on {}...".format(api))
+    # TODO: calculate recursive dependencies
 
 
 

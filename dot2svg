@@ -1,0 +1,3 @@
+#!/usr/bin/env sh
+# Note: I ran this for 34 minutes and it still didn't finish
+dot -Tsvg deps.dot -o deps.svg
