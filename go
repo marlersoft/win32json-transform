@@ -178,77 +178,123 @@ def main():
 
     print("types verified")
 
-    print("calculating recursive type references...")
+    out_direct_deps_filename = "out-direct-deps.txt"
+    print("generating {}...".format(out_direct_deps_filename))
+    with open(os.path.join(script_dir, out_direct_deps_filename), "w") as file:
+        for api in apis:
+            table = api_direct_type_refs_table[api]
+            for type_name,refs in table.top_level.items():
+                file.write("{}:{}\n".format(api, type_name))
+                for ref in refs:
+                    file.write("    {}\n".format(ref))
+
+
+    out_recursive_deps_filename = "out-recursive-deps.txt"
+    print("calculating recursive type references (will store in {})...".format(out_recursive_deps_filename))
     api_recursive_type_refs_table: Dict[str,dict[str,Set[ApiRef]]] = {}
-    with open(os.path.join(script_dir, "out-recursive-deps.txt"), "w") as file:
+    with open(os.path.join(script_dir, out_recursive_deps_filename), "w") as file:
         for api in apis:
             #print("calculating recursive deps on {}...".format(api))
             direct_type_refs_table = api_direct_type_refs_table[api]
             recursive_type_refs_table = {}
             for type_name,refs in direct_type_refs_table.top_level.items():
                 recursive_chains: List[List[ApiRef]] = []
-                getRecursiveChains(api_direct_type_refs_table, set(), refs, recursive_chains, None)
-                file.write("{}:{} -> {}\n".format(api, type_name, recursive_chains))
+                getRecursiveChains(api_direct_type_refs_table, set(), refs, recursive_chains, [])
+                if len(recursive_chains) > 0:
+                    file.write("{}:{}\n".format(api, type_name))
+                    for chain in recursive_chains:
+                        file.write("    {}\n".format(chain))
                 recursive_type_refs_table[type_name] = recursive_chains
             api_recursive_type_refs_table[api] = recursive_type_refs_table
     print("done calculating recursive type references")
 
     print("searching for cycles...")
     full_type_set: Set[ApiRef] = set()
-    cycle_type_set: Set[ApiRef] = set()
+    api_cycle_type_set: Dict[ApiRef,List[ApiRef]] = {}
+    #self_cycle_type_set: Dict[ApiRef,List[ApiRef]] = {}
+
+    def addApiCycleType(type_set, t, cycle):
+        if t in type_set:
+            pass
+            #print("type {} is in multiple cycles?".format(t))
+        else:
+            type_set[t] = cycle
+
     with open(os.path.join(script_dir, "out-cycles.txt"), "w") as file:
         for api in apis:
             #print("API: {}".format(api))
             table = api_recursive_type_refs_table[api]
-            cycle_count = 0
+            api_cycle_count = 0
             for type_name, recursive_chains in table.items():
                 type_api_ref = ApiRef(api, type_name)
                 full_type_set.add(type_api_ref)
                 for chain in recursive_chains:
-                    state = 0
-                    for ref in chain:
-                        if ref.api == api:
-                            if state == 1:
-                                state = 2
-                                break
+                    found_external_type = False
+                    cycle_len = 0
+                    for i in range(0, len(chain)):
+                        ref = chain[i]
+                        if not found_external_type:
+                            if ref.api != api:
+                                found_external_type = True
                         else:
-                            if state == 0:
-                                state = 1
-                    if state == 2:
-                        file.write("{}:{}  CHAIN={}\n".format(api, type_name, chain))
-                        cycle_count += 1
-                        cycle_type_set.add(type_api_ref)
-                        for ref in chain:
-                            cycle_type_set.add(ref)
+                            if ref.api == api:
+                                cycle_len = i+1
+                                break
+                    if cycle_len > 0:
+                        cycle = chain[:cycle_len]
+                        file.write("{}:{}  cycle={}\n".format(api, type_name, cycle))
+                        api_cycle_count += 1
+
+                        if cycle[-1] != type_api_ref:
+                            addApiCycleType(api_cycle_type_set, type_api_ref, cycle)
+                        for ref in cycle:
+                            addApiCycleType(api_cycle_type_set, ref, cycle)
                     else:
                         pass
                         #print("NOT CYCLIC: {}:{}  CHAIN={}".format(api, type_name, chain))
-            if cycle_count > 0:
-                print("{:4} cycles: {}:{}".format(cycle_count, api, type_name))
+            if api_cycle_count > 0:
+                print("{:4} cycles: {}:{}".format(api_cycle_count, api, type_name))
 
-    print("{} out of {} types involved in cycles".format(len(cycle_type_set), len(full_type_set)))
+    print("{} out of {} types involved in cycles".format(len(api_cycle_type_set), len(full_type_set)))
+    #print("{} types have self-referential cycles".format(len(self_cycle_type_set)))
+
+    api_types_list = list(api_cycle_type_set)
+    api_types_list.sort()
     with open(os.path.join(script_dir, "out-cycle-types.txt"), "w") as file:
-        cycle_types_list = list(cycle_type_set)
-        cycle_types_list.sort()
-        for cycle_type in cycle_types_list:
-            file.write("{}\n".format(cycle_type.combined))
+        for cycle_type in api_types_list:
+            file.write("{}\n".format(cycle_type))
+            for t in api_cycle_type_set[cycle_type]:
+                file.write("    {}\n".format(t))
+
+    # NOTE: this is not all the cycles, just some of the for now
+    with open(os.path.join(script_dir, "out-cycle-types.dot"), "w") as file:
+        file.write("digraph type_cycles {\n")
+        handled = set()
+        for cycle_type in api_types_list:
+            cycle = api_cycle_type_set[cycle_type]
+            file.write("\"{}\" -> \"{}\"\n".format(cycle_type, cycle[0]))
+            for i in range(1, len(cycle)):
+                file.write("\"{}\" -> \"{}\"\n".format(cycle[i-1], cycle[i]))
+        file.write("}\n")
+    #with open(os.path.join(script_dir, "out-self-cycle-types.txt"), "w") as file:
+    #    types_list = list(self_cycle_type_set)
+    #    types_list.sort()
+    #    for cycle_type in types_list:
+    #        file.write("{} (first chain {})\n".format(cycle_type.combined, self_cycle_type_set[cycle_type]))
 
     print("done")
 
 
-def getRecursiveChains(api_direct_type_refs_table: Dict[str,ApiTypeNameToApiRefMap], handled: Set[ApiRef], refs: Set[ApiRef], result: List[List[ApiRef]], current_chain: Optional[List[ApiRef]]) -> None:
+def getRecursiveChains(api_direct_type_refs_table: Dict[str,ApiTypeNameToApiRefMap], handled: Set[ApiRef], refs: Set[ApiRef], result: List[List[ApiRef]], base_chain: List[ApiRef]) -> None:
     for ref in refs:
         ref_api_table = api_direct_type_refs_table[ref.api]
-        if not isAnonType(ref.name) and ref.name in ref_api_table.top_level:
+        if (not isAnonType(ref.name)) and (ref.name in ref_api_table.top_level):
             #file.write("\"{}\" -> \"{}\";\n".format(type_name, ref.name))
-            next_chain = current_chain
-            if not next_chain:
-                next_chain = []
-                result.append(next_chain)
-            next_chain.append(ref)
-
+            next_chain = base_chain + [ref]
             ref_refs = ref_api_table.top_level[ref.name]
-            if not ref in handled:
+            if (len(ref_refs) == 0) or (ref in handled):
+                result.append(next_chain)
+            else:
                 handled.add(ref)
                 getRecursiveChains(api_direct_type_refs_table, handled, ref_refs, result, next_chain)
 
