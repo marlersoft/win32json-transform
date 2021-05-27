@@ -10,19 +10,13 @@
 import os
 import sys
 import json
-from typing import List, Set, Dict
-
-#def apiRefTypeName(type_obj):
-#    return ".".join(type_obj["Parents"] + [type_obj["Name"]])
+from typing import List, Set, Dict, Optional
 
 def getApiRefTopLevelType(type_obj):
     parents = type_obj["Parents"]
     if parents:
         return parents[0]
     return type_obj["Name"]
-
-#def apiRefName(type_obj):
-#    return type_obj["Api"] + ":" + apiRefTypeName(type_obj)
 
 class DefaultDict(dict):
     def __init__(self, factory):
@@ -40,10 +34,14 @@ class ApiRef:
         return self.combined.__eq__(other.combined)
     def __hash__(self):
         return self.combined.__hash__()
+    def __str__(self):
+        return self.combined
+    def __repr__(self):
+        return self.combined
 class ApiTypeNameToApiRefMap:
     def __init__(self):
-        self.top_level: dict[str,Set[ApiRef]] = {}
-        self.nested: dict[str,Set[ApiRef]] = {}
+        self.top_level: Dict[str,Set[ApiRef]] = {}
+        self.nested: Dict[str,Set[ApiRef]] = {}
 
 def getJsonApiRefs(api_refs: Set[ApiRef], json_obj):
     if isinstance(json_obj, dict):
@@ -85,7 +83,7 @@ def main():
     apis = [getApiName(basename) for basename in os.listdir(api_dir)]
     apis.sort()
 
-    api_direct_type_refs_table: dict[str,ApiTypeNameToApiRefMap] = {}
+    api_direct_type_refs_table: Dict[str,ApiTypeNameToApiRefMap] = {}
     print("loading types...")
     for api_name in apis:
         #print(api_name)
@@ -174,28 +172,68 @@ def main():
                                 sys.exit("!!!!!!!!!!! {} not in {} (and {} not in {})".format(ref.name, api, nested_name, api))
                             # TODO: should we save this nested name? not sure that we need to
 
-
     print("types verified")
 
-    print("creating deps.dot...")
-    with open(os.path.join(script_dir, "deps.dot"), "w") as file:
-        file.write("digraph deps {\n")
+    print("calculating recursive type references...")
+    api_recursive_type_refs_table: Dict[str,dict[str,Set[ApiRef]]] = {}
+    with open(os.path.join(script_dir, "out-recursive-deps.txt"), "w") as file:
         for api in apis:
+            #print("calculating recursive deps on {}...".format(api))
             direct_type_refs_table = api_direct_type_refs_table[api]
+            recursive_type_refs_table = {}
             for type_name,refs in direct_type_refs_table.top_level.items():
-                for ref in refs:
-                    table = api_direct_type_refs_table[ref.api]
-                    if not isAnonType(ref.name) and ref.name in table.top_level:
-                        file.write("\"{}\" -> \"{}\";\n".format(type_name, ref.name))
-        file.write("}\n")
+                recursive_chains: List[List[ApiRef]] = []
+                getRecursiveChains(api_direct_type_refs_table, set(), refs, recursive_chains, None)
+                file.write("{}:{} -> {}\n".format(api, type_name, recursive_chains))
+                recursive_type_refs_table[type_name] = recursive_chains
+            api_recursive_type_refs_table[api] = recursive_type_refs_table
+    print("done calculating recursive type references")
+
+    print("searching for cycles...")
+    with open(os.path.join(script_dir, "out-cycles.txt"), "w") as file:
+        for api in apis:
+            #print("API: {}".format(api))
+            table = api_recursive_type_refs_table[api]
+            cycle_count = 0
+            for type_name, recursive_chains in table.items():
+                type_api_ref = ApiRef(api, type_name)
+                for chain in recursive_chains:
+                    state = 0
+                    for ref in chain:
+                        if ref.api == api:
+                            if state == 1:
+                                state = 2
+                                break
+                        else:
+                            if state == 0:
+                                state = 1
+                    if state == 2:
+                        file.write("{}:{}  CHAIN={}\n".format(api, type_name, chain))
+                        cycle_count += 1
+                    else:
+                        pass
+                        #print("NOT CYCLIC: {}:{}  CHAIN={}".format(api, type_name, chain))
+            if cycle_count > 0:
+                print("{} cycles: {}:{}".format(cycle_count, api, type_name))
 
     print("done")
-    #for api in apis:
-    #for api in [apis[0]]:
-    #    print("calculating recursive deps on {}...".format(api))
-    # TODO: calculate recursive dependencies
 
 
+def getRecursiveChains(api_direct_type_refs_table: Dict[str,ApiTypeNameToApiRefMap], handled: Set[ApiRef], refs: Set[ApiRef], result: List[List[ApiRef]], current_chain: Optional[List[ApiRef]]) -> None:
+    for ref in refs:
+        ref_api_table = api_direct_type_refs_table[ref.api]
+        if not isAnonType(ref.name) and ref.name in ref_api_table.top_level:
+            #file.write("\"{}\" -> \"{}\";\n".format(type_name, ref.name))
+            next_chain = current_chain
+            if not next_chain:
+                next_chain = []
+                result.append(next_chain)
+            next_chain.append(ref)
+
+            ref_refs = ref_api_table.top_level[ref.name]
+            if not ref in handled:
+                handled.add(ref)
+                getRecursiveChains(api_direct_type_refs_table, handled, ref_refs, result, next_chain)
 
 def getNestedName(type_name: str, ref: ApiRef) -> str:
     type_names = type_name.split(".")
@@ -207,23 +245,5 @@ def getNestedName(type_name: str, ref: ApiRef) -> str:
         i += 1
     return  ".".join(type_names + ref_names[i:])
 
-#    recursive_dep_table: dict[str,Set[str]] = {}
-#    for api in apis:
-#        recursive_deps: Set[str] = set()
-#        getRecursiveDeps(api_direct_deps, api, recursive_deps)
-#        #print("{}: {}".format(api, recursive_deps))
-#        recursive_dep_table[api] = recursive_deps
-#    for api in apis:
-#        recursive_deps = recursive_dep_table[api]
-#        print("{}: {}".format(api, recursive_deps))
-#        if api in recursive_deps:
-#            print("{} is CYCLIC!!!!".format(api))
-#
-#def getRecursiveDeps(direct_dep_table: Set[Set[str]], name: str, result: Set[str]) -> None:
-#    for direct_dep in direct_dep_table[name]:
-#        if not direct_dep in result:
-#            result.add(direct_dep)
-#            getRecursiveDeps(direct_dep_table, direct_dep, result)
-#
 
 main()
