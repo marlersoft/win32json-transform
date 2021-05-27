@@ -32,6 +32,10 @@ class ApiRef:
         self.combined = format("{}:{}".format(api, name))
     def __eq__(self, other):
         return self.combined.__eq__(other.combined)
+    def __ge__(self, other):
+        return self.combined.__ge__(other.combined)
+    def __lt__(self, other):
+        return self.combined.__lt__(other.combined)
     def __hash__(self):
         return self.combined.__hash__()
     def __str__(self):
@@ -190,6 +194,8 @@ def main():
     print("done calculating recursive type references")
 
     print("searching for cycles...")
+    full_type_set: Set[ApiRef] = set()
+    cycle_type_set: Set[ApiRef] = set()
     with open(os.path.join(script_dir, "out-cycles.txt"), "w") as file:
         for api in apis:
             #print("API: {}".format(api))
@@ -197,6 +203,7 @@ def main():
             cycle_count = 0
             for type_name, recursive_chains in table.items():
                 type_api_ref = ApiRef(api, type_name)
+                full_type_set.add(type_api_ref)
                 for chain in recursive_chains:
                     state = 0
                     for ref in chain:
@@ -210,11 +217,21 @@ def main():
                     if state == 2:
                         file.write("{}:{}  CHAIN={}\n".format(api, type_name, chain))
                         cycle_count += 1
+                        cycle_type_set.add(type_api_ref)
+                        for ref in chain:
+                            cycle_type_set.add(ref)
                     else:
                         pass
                         #print("NOT CYCLIC: {}:{}  CHAIN={}".format(api, type_name, chain))
             if cycle_count > 0:
-                print("{} cycles: {}:{}".format(cycle_count, api, type_name))
+                print("{:4} cycles: {}:{}".format(cycle_count, api, type_name))
+
+    print("{} out of {} types involved in cycles".format(len(cycle_type_set), len(full_type_set)))
+    with open(os.path.join(script_dir, "out-cycle-types.txt"), "w") as file:
+        cycle_types_list = list(cycle_type_set)
+        cycle_types_list.sort()
+        for cycle_type in cycle_types_list:
+            file.write("{}\n".format(cycle_type.combined))
 
     print("done")
 
