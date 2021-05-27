@@ -16,6 +16,7 @@ from typing import List, Set, Dict, Optional
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 from apiref import ApiRef
+import apiload
 
 def getApiRefTopLevelType(type_obj):
     parents = type_obj["Parents"]
@@ -56,29 +57,13 @@ def isAnonType(type_name):
     return type_name.endswith("_e__Struct") or type_name.endswith("_e__Union")
 
 def main():
-    win32json_branch = "10.0.19041.202-preview"
-    win32json_sha = "7164f4ce9fe17b7c5da3473eed26886753ce1173"
-
-    win32json = os.path.join(SCRIPT_DIR, "win32json")
-    if not os.path.exists(win32json):
-        print("Error: missing '{}'".format(win32json))
-        print("Clone it with:")
-        print("  git clone https://github.com/marlersoft/win32json {} -b {} && git -C {} checkout {} -b for_win32_transform".format(win32json, win32json_branch, win32json, win32json_sha))
-
-    api_dir = os.path.join(win32json, "api")
-
-    def getApiName(basename: str) -> str:
-        if not basename.endswith(".json"):
-            sys.exit("found a non-json file '{}' in directory '{}'".format(basename, api_dir))
-        return basename[:-5]
-    apis = [getApiName(basename) for basename in os.listdir(api_dir)]
-    apis.sort()
+    apis = apiload.loadSortedList()
 
     api_direct_type_refs_table: Dict[str,ApiTypeNameToApiRefMap] = {}
     print("loading types...")
     for api_name in apis:
         #print(api_name)
-        filename = os.path.join(api_dir, api_name + ".json")
+        filename = os.path.join(apiload.WIN32JSON_API_DIR, api_name + ".json")
         with open(filename, "r", encoding='utf-8-sig') as file:
             api = json.load(file)
         constants = api["Constants"]
@@ -165,7 +150,7 @@ def main():
 
     print("types verified")
 
-    out_direct_deps_filename = "out-direct-deps.txt"
+    out_direct_deps_filename = "out_direct_deps.txt"
     print("generating {}...".format(out_direct_deps_filename))
     with open(os.path.join(SCRIPT_DIR, out_direct_deps_filename), "w") as file:
         for api in apis:
@@ -176,7 +161,7 @@ def main():
                     file.write("    {}\n".format(ref))
 
 
-    out_recursive_deps_filename = "out-recursive-deps.txt"
+    out_recursive_deps_filename = "out_recursive_deps.txt"
     print("calculating recursive type references (will store in {})...".format(out_recursive_deps_filename))
     api_recursive_type_refs_table: Dict[str,dict[str,Set[ApiRef]]] = {}
     with open(os.path.join(SCRIPT_DIR, out_recursive_deps_filename), "w") as file:
@@ -207,7 +192,7 @@ def main():
         else:
             type_set[t] = cycle
 
-    with open(os.path.join(SCRIPT_DIR, "out-cycles.txt"), "w") as file:
+    with open(os.path.join(SCRIPT_DIR, "out_cycles.txt"), "w") as file:
         for api in apis:
             #print("API: {}".format(api))
             table = api_recursive_type_refs_table[api]
@@ -247,12 +232,12 @@ def main():
 
     api_types_list = list(api_cycle_type_set)
     api_types_list.sort()
-    with open(os.path.join(SCRIPT_DIR, "out-cycle-types.txt"), "w") as file:
+    with open(os.path.join(SCRIPT_DIR, "out_cycle_types.txt"), "w") as file:
         for cycle_type in api_types_list:
             file.write("{}\n".format(cycle_type))
             for t in api_cycle_type_set[cycle_type]:
                 file.write("    {}\n".format(t))
-    with open(os.path.join(SCRIPT_DIR, "out-cycle-types.py"), "w") as file:
+    with open(os.path.join(SCRIPT_DIR, "out_cycle_types.py"), "w") as file:
         file.write("from apiref import ApiRef\n")
         file.write("CYCLE_TYPES = {\n")
         for cycle_type in api_types_list:
@@ -260,7 +245,7 @@ def main():
         file.write("}\n")
 
     # NOTE: this is not all the cycles, just some of the for now
-    with open(os.path.join(SCRIPT_DIR, "out-cycle-types.dot"), "w") as file:
+    with open(os.path.join(SCRIPT_DIR, "out_cycle_types.dot"), "w") as file:
         file.write("digraph type_cycles {\n")
         links = collections.defaultdict(set)
         def addLink(links, a, b):
@@ -274,7 +259,7 @@ def main():
             for i in range(1, len(cycle)):
                 addLink(links, cycle[i-1], cycle[i])
         file.write("}\n")
-    #with open(os.path.join(SCRIPT_DIR, "out-self-cycle-types.txt"), "w") as file:
+    #with open(os.path.join(SCRIPT_DIR, "out_self_cycle_types.txt"), "w") as file:
     #    types_list = list(self_cycle_type_set)
     #    types_list.sort()
     #    for cycle_type in types_list:

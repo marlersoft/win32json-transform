@@ -1,0 +1,17 @@
+#!/usr/bin/env python3
+import os
+import sys
+import json
+from typing import List, Set, Dict, Optional
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+import apiload
+from out_cycle_types import CYCLE_TYPES
+
+def main():
+    apis = apiload.loadSortedList()
+    for api in apis:
+        print(api)
+
+main()
