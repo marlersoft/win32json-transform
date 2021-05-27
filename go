@@ -10,6 +10,7 @@
 import os
 import sys
 import json
+import collections
 from typing import List, Set, Dict, Optional
 
 def getApiRefTopLevelType(type_obj):
@@ -269,12 +270,17 @@ def main():
     # NOTE: this is not all the cycles, just some of the for now
     with open(os.path.join(script_dir, "out-cycle-types.dot"), "w") as file:
         file.write("digraph type_cycles {\n")
-        handled = set()
+        links = collections.defaultdict(set)
+        def addLink(links, a, b):
+            link_set = links[a]
+            if b not in link_set:
+                link_set.add(b)
+                file.write("\"{}\" -> \"{}\"\n".format(a, b))
         for cycle_type in api_types_list:
             cycle = api_cycle_type_set[cycle_type]
-            file.write("\"{}\" -> \"{}\"\n".format(cycle_type, cycle[0]))
+            addLink(links, cycle_type, cycle[0])
             for i in range(1, len(cycle)):
-                file.write("\"{}\" -> \"{}\"\n".format(cycle[i-1], cycle[i]))
+                addLink(links, cycle[i-1], cycle[i])
         file.write("}\n")
     #with open(os.path.join(script_dir, "out-self-cycle-types.txt"), "w") as file:
     #    types_list = list(self_cycle_type_set)
