@@ -2,6 +2,7 @@
 import os
 import sys
 import json
+from collections import OrderedDict
 from typing import List, Set, Dict, Optional
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -11,7 +12,10 @@ from out_cycle_types import CYCLE_TYPES
 
 def main():
     apis = apiload.loadSortedList()
-    for api in apis:
-        print(api)
+    for api_name in apis:
+        print(api_name)
+        filename = os.path.join(apiload.WIN32JSON_API_DIR, api_name + ".json")
+        with open(filename, "r", encoding='utf-8-sig') as file:
+            api = json.load(file, object_pairs_hook=OrderedDict)
 
 main()

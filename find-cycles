@@ -10,7 +10,7 @@
 import os
 import sys
 import json
-import collections
+from collections import defaultdict, OrderedDict
 from typing import List, Set, Dict, Optional
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -65,7 +65,7 @@ def main():
         #print(api_name)
         filename = os.path.join(apiload.WIN32JSON_API_DIR, api_name + ".json")
         with open(filename, "r", encoding='utf-8-sig') as file:
-            api = json.load(file)
+            api = json.load(file, object_pairs_hook=OrderedDict)
         constants = api["Constants"]
         types = api["Types"]
         functions = api["Functions"]
@@ -182,7 +182,7 @@ def main():
 
     print("searching for cycles...")
     full_type_set: Set[ApiRef] = set()
-    api_cycle_type_set: Dict[ApiRef,List[ApiRef]] = {}
+    api_cycle_type_set: OrderedDict[ApiRef,List[ApiRef]] = {}
     #self_cycle_type_set: Dict[ApiRef,List[ApiRef]] = {}
 
     def addApiCycleType(type_set, t, cycle):
@@ -231,7 +231,8 @@ def main():
     #print("{} types have self-referential cycles".format(len(self_cycle_type_set)))
 
     api_types_list = list(api_cycle_type_set)
-    api_types_list.sort()
+    # I don't think I need to sort anymore since moving to OrderedDict
+    #api_types_list.sort()
     with open(os.path.join(SCRIPT_DIR, "out_cycle_types.txt"), "w") as file:
         for cycle_type in api_types_list:
             file.write("{}\n".format(cycle_type))
@@ -247,7 +248,7 @@ def main():
     # NOTE: this is not all the cycles, just some of the for now
     with open(os.path.join(SCRIPT_DIR, "out_cycle_types.dot"), "w") as file:
         file.write("digraph type_cycles {\n")
-        links = collections.defaultdict(set)
+        links = defaultdict(set)
         def addLink(links, a, b):
             link_set = links[a]
             if b not in link_set:
