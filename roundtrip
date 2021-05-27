@@ -1,0 +1,32 @@
+#!/usr/bin/env python3
+import os
+import sys
+import shutil
+import json
+from collections import OrderedDict
+from typing import List, Set, Dict, Optional
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+import apiload
+import apiwriter
+from out_cycle_types import CYCLE_TYPES
+
+def main():
+    out_dir = os.path.join(SCRIPT_DIR, "out_roundtrip")
+    if os.path.exists(out_dir):
+        shutil.rmtree(out_dir)
+    os.mkdir(out_dir)
+    
+    apis = apiload.loadSortedList()
+    #for api_name in apis:
+    for api_name in [apis[0]]:
+        print(api_name)
+        basename = api_name + ".json"
+        filename = os.path.join(apiload.WIN32JSON_API_DIR, basename)
+        with open(filename, "r", encoding='utf-8-sig') as file:
+            api = json.load(file, object_pairs_hook=OrderedDict)
+        with open(os.path.join(out_dir, basename), "w", encoding='utf-8-sig') as file:
+            apiwriter.write(file.write, api)
+
+main()
